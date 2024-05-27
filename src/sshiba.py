@@ -19,17 +19,49 @@ from sklearn.metrics import r2_score
 import torch
 from torch import nn, optim
 import pyro.contrib.gp as gp
-
 import time
 
 
+'''
+
+On the basis of the SSHIBA method proposed in SSHIBA, this notebook presents an extended and adapted version of this method to include different new considerations:
+
+    Semisupervised model which infers missing data as well as the data we want to predict.
+
+    A Feature Selection approach by using sparsity as the model is trained.
+    Multidimensional binary views model to broaden the problems the model can work with.
+    Classification model to directly work with categorical data.
+    Examples working with multiple views.
+
+As the model is able to work in different scenarios, we will try to cover them in the following notebooks, including some synthetic data to visualize the results. Nevertheless, the strength of the moedl is that it has been adpated to work with any combination of the previous modifications, i.e. Semisupervised, sparse, multilabel and multiview at the same time.
+
+'''
 class shinteticData:
     def __init__(self):
         pass
 
-    
-    def generateData(self, samples=1000,inputFeatures=55, outputFeatures=3, commonLatent=2, 
+    def generateData(self, samples=1000, inputFeatures=55, outputFeatures=3, commonLatent=2, 
                      firstViewLatent=3, secondViewLatent=3, myKc=20):
+        """
+        Generate synthetic data.
+
+        Parameters
+        ----------
+        samples : int, optional
+            Number of samples to generate (default is 1000).
+        inputFeatures : int, optional
+            Number of input features (default is 55).
+        outputFeatures : int, optional
+            Number of output features (default is 3).
+        commonLatent : int, optional
+            Number of common latent variables (default is 2).
+        firstViewLatent : int, optional
+            Number of latent variables for the first view (default is 3).
+        secondViewLatent : int, optional
+            Number of latent variables for the second view (default is 3).
+        myKc : int, optional
+            Number of total latent variables (default is 20).
+        """
         np.random.seed(0)
 
         N = samples  # number of samples
@@ -62,8 +94,15 @@ class shinteticData:
         self.__X1__ = np.dot(self.__Z__,W1.T) + np.random.normal(0.0, 0.1, D1 * N).reshape(N, D1)            
 
 
-
     def saveData(self, path):                    
+        """
+        Save generated data to files.
+
+        Parameters
+        ----------
+        path : str
+            Path to the directory where the data will be saved.
+        """
         if fo.checkIfDirecotryExists(path):
             np.save (os.path.join(path, 'matriw.npy'), self.__W_tot__)
             np.save (os.path.join(path, 'matriz.npy'), self.__Z__)
@@ -73,12 +112,7 @@ class shinteticData:
             print('Error, directory does not exist')
 
 
-
-
-
-
-
-class dataModel :
+class dataModel:
     def __init__(self):
         pass
 
@@ -91,22 +125,25 @@ class dataModel :
             self.__X1__ = np.load (os.path.join(path, 'matrix1.npy'))
         except Exception as e:
             print("Error loading data, %s" % e) 
+            exit()
 
-    def normalizeData (self):
-        self.__X_tr__,self.__X_tst__, self.__Y_tr__, self.__Y_tst__ = train_test_split(self.__X0__, self.__X1__, test_size=0.3, random_state = 31)
+    def normalizeData(self):
+        self.__X_tr__, self.__X_tst__, self.__Y_tr__, self.__Y_tst__ = train_test_split(self.__X0__, self.__X1__, test_size=0.3, random_state=31)
         scaler = StandardScaler()
         self.__X_tr__ = scaler.fit_transform(self.__X_tr__)
         self.__X_tst__ = scaler.transform(self.__X_tst__)
 
     def getXtr(self):
         return self.__X_tr__
+
     def getXtst(self):      
         return self.__X_tst__
+
     def getYtr(self):
         return self.__Y_tr__
+
     def getYtst(self):
         return self.__Y_tst__
-    
 
 
 class SSHIBA(object):    
@@ -155,9 +192,9 @@ class SSHIBA(object):
     
     """
     
-    def __init__(self, Kc = 2, prune = 0, fs = 0, SS_sep = 0,  hyper = None, X_init = None, 
-                 Z_init = None, W_init = [None], alpha_init = None, 
-                 tau_init = None, gamma_init = None, area_mask = None):
+    def __init__(self, Kc=2, prune=0, fs=0, SS_sep=0, hyper=None, X_init=None, 
+                 Z_init=None, W_init=[None], alpha_init=None, 
+                 tau_init=None, gamma_init=None, area_mask=None):
         self.Kc = int(Kc) # Number of  latent variables
         self.prune = int(prune) # Indicates whether the pruning is to be done        
         self.fs = int(fs) # Indicates whether the feature selection is to be done
@@ -170,7 +207,7 @@ class SSHIBA(object):
         self.tau_init = tau_init
         self.gamma_init = gamma_init
 
-    def fit(self, *args,**kwargs):
+    def fit(self, *args, **kwargs):
         """Fit model to data.
         
         Parameters
@@ -200,11 +237,11 @@ class SSHIBA(object):
         """
         
         self.n = []
-        for (m,arg) in enumerate(args):
+        for (m, arg) in enumerate(args):
             if type(arg) == dict:
                 self.n.append(int(arg['data'].shape[0]))
             else:
-                for (mx,x) in enumerate(arg):
+                for (mx, x) in enumerate(arg):
                     self.n.append(int(arg[mx]['data'].shape[0]))
                     
         self.n_max = np.max(self.n)
@@ -231,7 +268,7 @@ class SSHIBA(object):
                 self.m += 1
                 self.initializeView(arg)
             else:
-                for (mx,x) in enumerate(arg):
+                for (mx, x) in enumerate(arg):
                     self.m += 1
                     self.initializeView(x)
         self.L = []
@@ -243,7 +280,7 @@ class SSHIBA(object):
         self.ACC = []
         self.ACC_tr = []
 
-        self.m = self.m+1
+        self.m = self.m + 1
         if self.hyper == None:
             self.hyper = HyperParameters(self.m)
             
@@ -251,8 +288,8 @@ class SSHIBA(object):
             self.Kc = self.W_init[0]['mean'].shape[1]
         self.q_dist = Qdistribution(self.X, self.n, self.n_max, self.d, self.Kc, self.m, self.sparse, self.method, self.SS, 
                                     self.SS_mask, self.area_mask, self.hyper, 
-                                    Z_init = self.Z_init, W_init = self.W_init, alpha_init = self.alpha_init, 
-                                    tau_init = self.tau_init, gamma_init = self.gamma_init)               
+                                    Z_init=self.Z_init, W_init=self.W_init, alpha_init=self.alpha_init, 
+                                    tau_init=self.tau_init, gamma_init=self.gamma_init)               
         self.fit_iterate(**kwargs)
         
     def initializeView(self, arg):
@@ -265,6 +302,7 @@ class SSHIBA(object):
             elif arg['method'] == 'cat': #Categorical
                 self.d.append(int(len(np.unique(arg['data'][~np.isnan(arg['data'])]))))
             elif arg['method'] == 'mult': #Multilabel
+                self.d.append(int(arg['data'].shape[1]))
                 if len(arg['data'].shape) < 2:
                     arg['data'] = arg['data'][:, np.newaxis]
                 self.d.append(int(arg['data'].shape[1]))
