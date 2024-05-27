@@ -1902,3 +1902,19 @@ class Qdistribution(object):
         """
         
         return self.gamma[m]["a"] / self.gamma[m]["b"]
+    
+
+    def save(self, path):
+        """ Save the parameters of the model.
+    
+        Parameters
+        ----------
+        __path : str.
+            Path where the parameters are saved.
+            
+        """
+        try:
+            with open(path, 'wb') as f:
+                pickle.dump(self.__dict__, f)
+        except Exception as e:
+            print ('Error saving model %s' % e) 
